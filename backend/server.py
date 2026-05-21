@@ -367,6 +367,30 @@ async def list_loras():
     return {"dir": str(LORA_DIR), "files": files}
 
 
+class PrecisionBody(BaseModel):
+    precision: str  # "fp16" or "fp32"
+
+
+@app.post("/api/precision")
+async def set_precision(body: PrecisionBody):
+    global _use_fp16
+    want_fp16 = body.precision == "fp16"
+    if want_fp16 == _use_fp16:
+        return {"precision": "fp16" if _use_fp16 else "fp32"}
+    if DEVICE != "cuda":
+        raise HTTPException(400, "precision switching requires CUDA")
+    if want_fp16:
+        _model.half()
+        sa.model_half = True
+    else:
+        _model.float()
+        sa.model_half = False
+    _use_fp16 = want_fp16
+    torch.cuda.empty_cache()
+    print(f"[backend] precision switched to {'fp16' if _use_fp16 else 'fp32'}")
+    return {"precision": "fp16" if _use_fp16 else "fp32"}
+
+
 @app.get("/api/stats")
 async def get_stats():
     cpu = psutil.cpu_percent(interval=None)
@@ -383,6 +407,7 @@ async def get_stats():
         "ram_used": round(ram_used_gb, 1),
         "ram_total": round(ram_total_gb, 1),
         "gpu_alloc": round(gpu_alloc_gb, 2),
+        "precision": "fp16" if _use_fp16 else "fp32",
         "model_loaded": True,
     }
 

@@ -53,6 +53,21 @@ function rerollSeed() {
   session.seed = Math.floor(Math.random() * 1000000);
 }
 
+async function setPrecision(e) {
+  const val = e.target.value;
+  try {
+    const r = await fetch("/api/precision", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ precision: val }),
+    });
+    if (r.ok) {
+      const j = await r.json();
+      session.precision = j.precision;
+    }
+  } catch (err) { console.error("precision switch failed:", err); }
+}
+
 async function rerollGenerate() {
   rerollSeed();
   try { await apiGenerate(); } catch (e) { console.error(e); alert("generate failed: " + e.message); }
@@ -124,6 +139,13 @@ async function clickGenerate() {
         <select class="select" bind:value={session.model}>
           <option>Medium (ARC)</option>
           <option>Medium-base (RF)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Precision</label>
+        <select class="select" value={session.precision} onchange={setPrecision}>
+          <option value="fp16">fp16 (fast, less VRAM)</option>
+          <option value="fp32">fp32 (higher quality)</option>
         </select>
       </div>
       <!-- Length: only matters when generating from scratch (no source loaded) -->

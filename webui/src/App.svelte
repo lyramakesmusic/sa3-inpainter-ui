@@ -201,6 +201,7 @@ async function pollStats() {
       gpuAllocGb: j.gpu_alloc,
     };
     session.modelLoaded = j.model_loaded;
+    if (j.precision) session.precision = j.precision;
   } catch (e) {
     session.modelLoaded = false;
   }

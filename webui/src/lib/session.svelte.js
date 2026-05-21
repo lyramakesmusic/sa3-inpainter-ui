@@ -71,9 +71,10 @@ class Session {
     this.variantIndex = this.variants.length - 1;
   }
 
+  precision = $state("fp16");
   generating = $state(false);
-  scrubbingNoise = $state(false); // true while the user is actively dragging the A2A slider
-  modelLoaded = $state(false); // assume down until pollStats confirms otherwise
+  scrubbingNoise = $state(false);
+  modelLoaded = $state(false);
   stats = $state({ cpu: 0, vram: 0, ram: 0 });
 
   get latentCount() {
