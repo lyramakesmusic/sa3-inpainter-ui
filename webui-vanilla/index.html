@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Audio Inpainter</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- top bar -->
+  <header class="topbar">
+    <div class="brand">
+      <i class="bi bi-soundwave brand-icon"></i>
+      <span class="brand-name">Audio Inpainter</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost"><i class="bi bi-folder2-open"></i> Load</button>
+      <button class="btn btn-ghost"><i class="bi bi-file-earmark-plus"></i> New</button>
+      <button class="btn btn-ghost"><i class="bi bi-x-lg"></i> Clear</button>
+    </div>
+  </header>
+
+  <!-- main editor area: left canvas, right rail -->
+  <main class="editor">
+    <section class="canvas-column">
+
+      <div class="canvas-row">
+        <span class="row-label">Latents</span>
+        <div class="row-body">
+          <canvas id="latentStrip"></canvas>
+        </div>
+      </div>
+
+      <div class="canvas-row">
+        <span class="row-label">Overview</span>
+        <div class="row-body">
+          <canvas id="overview"></canvas>
+        </div>
+      </div>
+
+      <div class="canvas-row main">
+        <span class="row-label freq-axis">
+          <span>20k</span><span>10k</span><span>5k</span><span>2k</span>
+          <span>1k</span><span>500</span><span>250</span><span>120</span>
+          <span>60</span><span>30</span>
+        </span>
+        <div class="row-body main-canvas">
+          <img id="specImage" src="assets/demo_spec.png" alt="">
+          <div id="regionLayer" class="region-layer"></div>
+          <div id="playhead" class="playhead"></div>
+        </div>
+      </div>
+
+      <div class="time-axis">
+        <span>00:00</span><span>00:20</span><span>00:40</span>
+        <span>01:00</span><span>01:20</span><span>01:40</span>
+        <span>02:00</span><span>02:20</span><span>02:40</span><span>03:00</span>
+      </div>
+    </section>
+
+    <!-- right rail -->
+    <aside class="right-rail">
+
+      <section class="panel">
+        <header class="panel-header">
+          <span>Prompt</span>
+          <button class="icon-btn"><i class="bi bi-chevron-up"></i></button>
+        </header>
+        <div class="panel-body">
+          <textarea class="prompt-input"
+            placeholder="describe what you want…">House music, 124 BPM, energetic festival vibes</textarea>
+          <div class="prompt-meta">
+            <span class="text-muted">47 / 500</span>
+            <button class="link">Clear</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-header">
+          <span>Generation</span>
+          <button class="icon-btn"><i class="bi bi-chevron-up"></i></button>
+        </header>
+        <div class="panel-body">
+          <div class="form-row">
+            <label>Model</label>
+            <select class="select">
+              <option>Medium (ARC)</option>
+              <option>Medium-base (RF)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Steps</label>
+            <div class="slider-row">
+              <input type="range" min="1" max="32" value="8" class="slider">
+              <span class="value">8</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Guidance</label>
+            <div class="slider-row">
+              <input type="range" min="1" max="100" value="10" class="slider">
+              <span class="value">1.0</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Noise</label>
+            <div class="slider-row">
+              <input type="range" min="0" max="100" value="45" class="slider">
+              <span class="value">0.45</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Seed</label>
+            <div class="seed-row">
+              <input type="text" value="123456" class="seed-input">
+              <button class="icon-btn"><i class="bi bi-dice-5"></i></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-header">
+          <span>LoRAs</span>
+          <div class="header-actions">
+            <button class="icon-btn"><i class="bi bi-plus"></i></button>
+            <button class="icon-btn"><i class="bi bi-dash"></i></button>
+          </div>
+        </header>
+        <div class="panel-body">
+          <div class="lora-card">
+            <div class="lora-head">
+              <span class="lora-name">airy_vocal_v2</span>
+              <button class="icon-btn"><i class="bi bi-x"></i></button>
+            </div>
+            <div class="slider-row">
+              <input type="range" min="0" max="100" value="70" class="slider">
+              <span class="value">0.70</span>
+            </div>
+          </div>
+          <div class="lora-card">
+            <div class="lora-head">
+              <span class="lora-name">vocal_ambience</span>
+              <button class="icon-btn"><i class="bi bi-x"></i></button>
+            </div>
+            <div class="slider-row">
+              <input type="range" min="0" max="100" value="45" class="slider">
+              <span class="value">0.45</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel cta-panel">
+        <button class="btn btn-primary btn-lg">
+          <i class="bi bi-magic"></i> Inpaint
+        </button>
+        <button class="btn btn-secondary btn-square">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </section>
+
+      <section class="variant-nav">
+        <button class="icon-btn"><i class="bi bi-chevron-left"></i></button>
+        <span class="variant-count">1 / 3</span>
+        <button class="icon-btn"><i class="bi bi-chevron-right"></i></button>
+      </section>
+
+    </aside>
+  </main>
+
+  <!-- bottom bar -->
+  <footer class="bottombar">
+    <div class="transport">
+      <button class="icon-btn"><i class="bi bi-arrow-repeat"></i></button>
+      <button class="icon-btn"><i class="bi bi-skip-backward-fill"></i></button>
+      <button class="icon-btn play"><i class="bi bi-play-fill"></i></button>
+      <button class="icon-btn"><i class="bi bi-stop-fill"></i></button>
+      <button class="icon-btn"><i class="bi bi-skip-forward-fill"></i></button>
+    </div>
+
+    <div class="volume">
+      <i class="bi bi-volume-up"></i>
+      <input type="range" min="0" max="100" value="70" class="slider slim">
+    </div>
+
+    <div class="time-display">
+      <span class="time-now">00:12.428</span>
+      <span class="time-sep">/</span>
+      <span class="time-total">03:00.000</span>
+    </div>
+
+    <div class="meta-info">44.1 kHz · 24-bit · Stereo</div>
+
+    <button class="btn btn-ghost vis-toggle">
+      <i class="bi bi-bar-chart-fill"></i> Spectrogram
+    </button>
+
+    <div class="status">
+      <span class="status-dot ok"></span> Model loaded
+    </div>
+
+    <div class="sys-stats">
+      <div class="stat">
+        <span class="stat-label">CPU</span><span class="stat-value">18%</span>
+        <div class="bar"><div class="bar-fill" style="width:18%"></div></div>
+      </div>
+      <div class="stat">
+        <span class="stat-label">VRAM</span><span class="stat-value">2.1/8</span>
+        <div class="bar"><div class="bar-fill" style="width:26%"></div></div>
+      </div>
+      <div class="stat">
+        <span class="stat-label">RAM</span><span class="stat-value">6.3/32</span>
+        <div class="bar"><div class="bar-fill" style="width:20%"></div></div>
+      </div>
+    </div>
+  </footer>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

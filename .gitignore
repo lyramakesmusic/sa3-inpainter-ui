@@ -1,0 +1,28 @@
+# env / caches
+.venv/
+__pycache__/
+*.pyc
+.python-version
+uv.lock
+.DS_Store
+
+# weights / large data — not for git
+weights/
+models/
+*.safetensors
+*.npz
+*.wav
+*.mp3
+*.flac
+
+# webui node
+webui/node_modules/
+webui/.svelte-kit/
+webui/dist/
+webui/.vite/
+
+# transient
+/tmp/
+*.log
+.cache/
+.ruff_cache/
