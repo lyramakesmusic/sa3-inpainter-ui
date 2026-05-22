@@ -16,8 +16,23 @@ dependencies = [
     "scipy>=1.17.1",
     "sentencepiece>=0.2.1",
     "soundfile>=0.13.1",
-    "torch>=2.12.0",
-    "torchaudio>=2.11.0",
+    "torch==2.7.1",
+    "torchaudio==2.7.1",
     "transformers>=5.9.0",
     "uvicorn>=0.47.0",
+    "stable-audio-3",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+stable-audio-3 = { git = "https://github.com/Stability-AI/stable-audio-3.git" }
+torch = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+torchaudio = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
 ]

@@ -87,28 +87,38 @@ function currentMaskedGain() {
 }
 let _maskedNow = false;
 
-// when audio source bumps version: swap src without interrupting playback
+// robust seek: applies immediately if audio is ready, otherwise queues for loadedmetadata
+function seekTo(seconds) {
+  if (!audioEl) return;
+  const apply = () => { try { audioEl.currentTime = Math.min(seconds, audioEl.duration || seconds); } catch {} };
+  if (audioEl.readyState >= 1 && audioEl.duration) apply();
+  else audioEl.addEventListener("loadedmetadata", apply, { once: true });
+}
+
+// when audio source bumps version: swap src, then restore last known playhead
 $effect(() => {
   if (!audioEl) return;
   session.version;
   if (!session.hasAudio) { audioEl.src = ""; return; }
   const wasPlaying = !audioEl.paused;
-  const t = audioEl.currentTime || 0;
-  const onReady = () => {
-    audioEl.removeEventListener("loadedmetadata", onReady);
-    try { audioEl.currentTime = Math.min(t, (audioEl.duration || t)); } catch {}
-    if (wasPlaying) audioEl.play().catch(() => {});
-  };
-  audioEl.addEventListener("loadedmetadata", onReady);
   audioEl.src = `/api/audio?v=${session.version}`;
+  audioEl.addEventListener("loadedmetadata", () => {
+    seekTo(session.playhead * (session.trackSeconds || audioEl.duration || 0));
+    if (wasPlaying) audioEl.play().catch(() => {});
+  }, { once: true });
 });
 
-// when user moves playhead via UI, sync audio
+// when user moves playhead via UI, sync audio (queues if audio isn't ready yet)
 $effect(() => {
   if (!audioEl || !session.hasAudio) return;
   const targetTime = session.playhead * session.trackSeconds;
-  if (Math.abs(audioEl.currentTime - targetTime) > 0.5) {
-    audioEl.currentTime = targetTime;
+  if (!isFinite(targetTime)) return;
+  if (audioEl.readyState >= 1 && audioEl.duration) {
+    if (Math.abs(audioEl.currentTime - targetTime) > 0.25) {
+      try { audioEl.currentTime = Math.min(targetTime, audioEl.duration); } catch {}
+    }
+  } else {
+    seekTo(targetTime);
   }
 });
 

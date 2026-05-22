@@ -157,6 +157,10 @@ export async function apiGenerate() {
       body: JSON.stringify(body),
       signal: _genAbort.signal,
     });
+    if (r.status === 409) {
+      console.warn("[generate] backend busy with another gen — try again when it finishes");
+      return null;
+    }
     if (!r.ok) throw new Error("generate failed: " + r.status);
     const j = await r.json();
     session.hasAudio = true;

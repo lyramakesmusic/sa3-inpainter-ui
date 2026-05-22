@@ -3,7 +3,7 @@
 Loads the SA3 medium model once at startup (~30s), exposes JSON API for the
 Svelte frontend.
 """
-import os, sys, json, time, warnings
+import os, sys, json, time, warnings, asyncio, threading
 from pathlib import Path
 warnings.filterwarnings("ignore")
 os.environ.setdefault("PYTHONWARNINGS", "ignore")
@@ -13,8 +13,7 @@ import torch
 import soundfile as sf
 import mlx.core as mx
 
-sys.path.insert(0, str(Path.home() / "Projects/sa3-mlx"))
-sys.path.insert(0, str(Path.home() / "Projects/stable-audio-3/stable-audio-3-repo"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # for mlx_sa3
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
@@ -62,6 +61,7 @@ def render_noise_spec_once():
     render_spec_png(wav_np, out_path)
 
 state = {"audio_path": None, "version": 0}
+_gen_lock = threading.Lock()
 app = FastAPI()
 
 
@@ -182,6 +182,17 @@ class GenBody(BaseModel):
 
 @app.post("/api/generate")
 async def generate(body: GenBody):
+    # only one gen at a time; reject overlapping requests (lets the client retry).
+    # the gen itself runs in a thread so the event loop stays responsive for stats/state/etc.
+    if not _gen_lock.acquire(blocking=False):
+        raise HTTPException(409, "generation in progress")
+    try:
+        return await asyncio.to_thread(_run_generate, body)
+    finally:
+        _gen_lock.release()
+
+
+def _run_generate(body):
     s = body.settings
     steps = int(s.get("steps", 8))
     cfg = float(s.get("cfg", 1.0))
