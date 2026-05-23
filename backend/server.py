@@ -1279,6 +1279,9 @@ class TrainLoraBody(BaseModel):
     checkpoint_every: int = 100
     exclude: list[str] | None = None
     use_compile: bool = False
+    train_conditioner: bool = False
+    dist_shift: bool = True
+    grad_checkpoint: bool = True
 
 class PreEncodeBody(BaseModel):
     folder: str
@@ -1307,19 +1310,31 @@ async def start_pre_encode(body: PreEncodeBody):
     if _current_model and "small" in _current_model:
         ae_model = "same-s"
 
-    script = str(Path(__file__).resolve().parent / "pre_encode.py")
-    cmd = [
-        sys.executable, script,
-        "--audio-folder", str(folder),
-        "--output-dir", output_dir,
-        "--caption", body.caption or body.name,
-        "--ae-model", ae_model,
-    ]
-
     env = os.environ.copy()
     env["SA3_ROOT"] = _settings["sa3_root"]
+    env["SA3_MODELS_DIR"] = str(MODELS_DIR)
     if _settings.get("hf_token"):
         env["HF_TOKEN"] = _settings["hf_token"]
+
+    if HAS_MLX:
+        # MLX pre-encoding path (Apple Silicon)
+        script = str(Path(__file__).resolve().parent.parent / "mlx_sa3" / "pre_encode_mlx.py")
+        enc_dir = str(Path(output_dir) / "_encoded")
+        cmd = [
+            sys.executable, script,
+            "--audio-dir", str(folder),
+            "--output-dir", enc_dir,
+        ]
+    else:
+        # PyTorch pre-encoding path (CUDA)
+        script = str(Path(__file__).resolve().parent / "pre_encode.py")
+        cmd = [
+            sys.executable, script,
+            "--audio-folder", str(folder),
+            "--output-dir", output_dir,
+            "--caption", body.caption or body.name,
+            "--ae-model", ae_model,
+        ]
 
     _pre_encode_proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -1419,29 +1434,67 @@ async def start_lora_training(body: TrainLoraBody):
     checkpoint_every = max(1, body.checkpoint_every // batch_size)
     print(f"[lora_train] total_steps={body.steps} ÷ batch={batch_size} → optimizer_steps={optimizer_steps}")
 
-    script = str(Path(__file__).resolve().parent / "train_lora.py")
-    cmd = [
-        sys.executable, script,
-        "--model-name", model_name,
-        "--audio-folder", str(folder),
-        "--output-dir", output_dir,
-        "--caption", body.caption or body.name,
-        "--rank", str(body.rank),
-        "--adapter-type", body.adapter_type,
-        "--steps", str(optimizer_steps),
-        "--lr", str(body.lr),
-        "--batch-size", str(batch_size),
-        "--checkpoint-every", str(checkpoint_every),
-    ]
-    if body.exclude:
-        cmd.extend(["--exclude"] + body.exclude)
-    if body.use_compile:
-        cmd.append("--compile")
-
     env = os.environ.copy()
     env["SA3_ROOT"] = _settings["sa3_root"]
+    env["SA3_MODELS_DIR"] = str(MODELS_DIR)
+    env["SA3_LORA_DIR"] = str(LORA_DIR)
     if _settings.get("hf_token"):
         env["HF_TOKEN"] = _settings["hf_token"]
+
+    # Check for pre-encoded latents
+    enc_dir = Path(output_dir) / "_encoded"
+    has_encoded = enc_dir.is_dir() and list(enc_dir.glob("*.npy"))
+
+    use_mlx_train = HAS_MLX
+    if use_mlx_train:
+        # MLX training path (Apple Silicon)
+        script = str(Path(__file__).resolve().parent.parent / "mlx_sa3" / "train_lora_mlx.py")
+        if not has_encoded:
+            raise HTTPException(400,
+                "MLX training requires pre-encoded latents. "
+                "Run pre-encoding first or transfer pre-encoded data from a CUDA machine.")
+        cmd = [
+            sys.executable, script,
+            "--model-name", model_name,
+            "--encoded-dir", str(enc_dir),
+            "--output-dir", output_dir,
+            "--caption", body.caption or body.name,
+            "--rank", str(body.rank),
+            "--adapter-type", body.adapter_type,
+            "--steps", str(optimizer_steps),
+            "--lr", str(body.lr),
+            "--batch-size", str(batch_size),
+            "--checkpoint-every", str(checkpoint_every),
+        ]
+        if body.dist_shift:
+            cmd.append("--dist-shift")
+        if body.grad_checkpoint:
+            cmd.append("--grad-checkpoint")
+        if body.train_conditioner:
+            cmd.append("--train-conditioner")
+        if body.exclude:
+            cmd.extend(["--exclude"] + body.exclude)
+        print(f"[lora_train] using MLX training backend ({body.adapter_type})")
+    else:
+        # PyTorch training path (CUDA)
+        script = str(Path(__file__).resolve().parent / "train_lora.py")
+        cmd = [
+            sys.executable, script,
+            "--model-name", model_name,
+            "--audio-folder", str(folder),
+            "--output-dir", output_dir,
+            "--caption", body.caption or body.name,
+            "--rank", str(body.rank),
+            "--adapter-type", body.adapter_type,
+            "--steps", str(optimizer_steps),
+            "--lr", str(body.lr),
+            "--batch-size", str(batch_size),
+            "--checkpoint-every", str(checkpoint_every),
+        ]
+        if body.exclude:
+            cmd.extend(["--exclude"] + body.exclude)
+        if body.use_compile:
+            cmd.append("--compile")
 
     _lora_train_proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -1450,7 +1503,8 @@ async def start_lora_training(body: TrainLoraBody):
         env=env,
     )
     return {"status": "started", "name": body.name, "output_dir": output_dir,
-            "batch_size": batch_size, "optimizer_steps": optimizer_steps}
+            "batch_size": batch_size, "optimizer_steps": optimizer_steps,
+            "backend": "mlx" if use_mlx_train else "cuda"}
 
 
 @app.get("/api/train_lora/status")

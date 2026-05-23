@@ -11,7 +11,7 @@ Upstream: [Stability-AI/stable-audio-3](https://github.com/Stability-AI/stable-a
 - **Inpainting** — paint directly on the spectrogram to select regions, then regenerate with a text prompt
 - **Text-to-audio** — generate up to 380s of audio from a prompt
 - **Audio-to-audio** — vary existing audio with controllable strength
-- **LoRA training** — train LoRAs from the UI with auto batch sizing, pre-encoded latents, and torch.compile support. Model auto-unloads during training to fit in 24GB VRAM
+- **LoRA training** — train LoRAs from the UI with auto batch sizing, pre-encoded latents, and torch.compile support. Model auto-unloads during training to fit in 24GB VRAM. Native MLX training on Apple Silicon
 - **LoRA inference** — stack multiple LoRAs with per-LoRA strength sliders and trigger words
 - **Textual inversion** — train and apply custom text embeddings
 - **Multi-model** — switch between medium, medium-base, small-music, small-sfx. Auto-downloads from HF
@@ -100,6 +100,9 @@ backend/tome.py                  Token merging (ToME) for inference speedup
 mlx_sa3/ae.py                   MLX AE decoder (Apple Silicon)
 mlx_sa3/nn_blocks.py            Transformer + differential attention + band-mask SWA
 mlx_sa3/weights.py              Safetensors to MLX weight remap
+mlx_sa3/lora.py                 MLX LoRA adapter injection + weight save/load
+mlx_sa3/train_lora_mlx.py       MLX LoRA training loop (Apple Silicon)
+mlx_sa3/pre_encode_mlx.py       MLX audio-to-latent pre-encoding
 webui/src/lib/session.svelte.js  Shared reactive state + API client
 webui/src/lib/MainCanvas.svelte  Spectrogram + paint + zoom interaction
 webui/src/lib/RightRail.svelte   Right sidebar: prompt, generation, LoRA, training, advanced
