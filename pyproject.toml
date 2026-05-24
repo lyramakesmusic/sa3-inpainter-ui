@@ -2,37 +2,56 @@
 name = "sa3-mlx"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "einops>=0.8.2",
     "fastapi>=0.136.1",
     "huggingface-hub>=1.15.0",
     "matplotlib>=3.10.9",
-    "mlx>=0.31.2",
-    "numpy>=2.4.6",
+    "numpy>=2.2.6",
     "psutil>=7.2.2",
     "python-multipart>=0.0.29",
     "safetensors>=0.7.0",
-    "scipy>=1.17.1",
+    "scipy>=1.15.0",
     "sentencepiece>=0.2.1",
     "soundfile>=0.13.1",
-    "torch==2.7.1",
-    "torchaudio==2.7.1",
+    "torch>=2.11.0,<2.12",
+    "torchaudio>=2.11.0,<2.12",
+    "rocm[libraries]==7.13.0 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "transformers>=5.9.0",
     "uvicorn>=0.47.0",
     "stable-audio-3",
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
+name = "amd-gfx1151"
+url = "https://repo.amd.com/rocm/whl/gfx1151/"
+
+[project.optional-dependencies]
+mlx = [
+    "mlx>=0.31.2",
+]
 
 [tool.uv.sources]
-stable-audio-3 = { git = "https://github.com/Stability-AI/stable-audio-3.git" }
+stable-audio-3 = { path = "vendor/stable-audio-3", editable = true }
 torch = [
-  { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+  { index = "amd-gfx1151", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
 ]
 torchaudio = [
-  { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+  { index = "amd-gfx1151", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+pytorch-triton-rocm = [
+  { index = "amd-gfx1151", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+triton = [
+  { index = "amd-gfx1151", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+rocm = [
+  { index = "amd-gfx1151", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+rocm-sdk-core = [
+  { index = "amd-gfx1151", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+rocm-sdk-libraries-gfx1151 = [
+  { index = "amd-gfx1151", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
 ]

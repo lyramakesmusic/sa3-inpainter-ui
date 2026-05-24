@@ -3,7 +3,7 @@
 Loads the SA3 medium model once at startup (~30s), exposes JSON API for the
 Svelte frontend.
 """
-import os, sys, json, time, warnings, asyncio, threading
+import os, sys, json, time, warnings, asyncio, threading, platform
 from pathlib import Path
 warnings.filterwarnings("ignore")
 os.environ.setdefault("PYTHONWARNINGS", "ignore")
@@ -11,7 +11,6 @@ os.environ.setdefault("PYTHONWARNINGS", "ignore")
 import numpy as np
 import torch
 import soundfile as sf
-import mlx.core as mx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # for mlx_sa3
 
@@ -21,11 +20,11 @@ from pydantic import BaseModel
 
 from stable_audio_3.factory import create_diffusion_cond_from_config
 from stable_audio_3 import StableAudioModel
+from stable_audio_3.loading_utils import load_autoencoder
 from safetensors.torch import load_file
-from mlx_sa3.ae import SA3MediumAE, decode_chunked
-from mlx_sa3.weights import load_ae_weights
 
-LOCAL_MEDIUM = "/Users/lyra/Projects/stable-audio-3/models/stable-audio-3-medium"
+DEFAULT_MODEL_DIR = str(Path.home() / "Projects/stable-audio-3/models/stable-audio-3-medium")
+LOCAL_MEDIUM = os.environ.get("SA3_MODEL_DIR", DEFAULT_MODEL_DIR)
 CKPT = f"{LOCAL_MEDIUM}/model.safetensors"
 CFG  = f"{LOCAL_MEDIUM}/model_config.json"
 DATA_DIR = Path("/tmp/sa3-inpainter"); DATA_DIR.mkdir(exist_ok=True)
@@ -33,18 +32,73 @@ SR = 44100
 DOWNSAMPLE = 4096
 BANDS = [(0, 250), (250, 2500), (2500, 22050)]
 
-print("[backend] loading sa3 medium on MPS...")
+
+def pick_device():
+    requested = os.environ.get("SA3_DEVICE", "auto").lower()
+    if requested != "auto":
+        return requested
+    if torch.cuda.is_available():
+        # ROCm PyTorch also reports AMD GPUs through the cuda device API.
+        return "cuda"
+    if platform.system() == "Darwin" and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+DEVICE = pick_device()
+MODEL_HALF = os.environ.get("SA3_MODEL_HALF", "0") == "1"
+AE_BACKEND = os.environ.get("SA3_AE_BACKEND", "auto").lower()
+if AE_BACKEND == "auto":
+    AE_BACKEND = "mlx" if DEVICE == "mps" and platform.system() == "Darwin" else "torch"
+AE_DEVICE = os.environ.get("SA3_AE_DEVICE")
+if AE_DEVICE is None:
+    AE_DEVICE = DEVICE
+
+print(f"[backend] loading sa3 medium on {DEVICE}...")
 _cfg = json.load(open(CFG))
 for c in _cfg["model"]["conditioning"]["configs"]:
     if c["type"] == "t5gemma":
         c["config"]["repo_id"] = LOCAL_MEDIUM
 _model = create_diffusion_cond_from_config(_cfg)
 _model.load_state_dict(load_file(CKPT), strict=False)
-_model.eval().requires_grad_(False).to("mps")
-sa = StableAudioModel(_model, _cfg, device="mps", model_half=False)
-print("[backend] loading MLX AE...")
-mlx_ae = SA3MediumAE()
-load_ae_weights(mlx_ae, CKPT)
+_model.eval().requires_grad_(False).to(DEVICE)
+sa = StableAudioModel(_model, _cfg, device=DEVICE, model_half=MODEL_HALF)
+
+mlx_ae = None
+torch_ae = None
+if AE_BACKEND == "mlx":
+    print("[backend] loading MLX AE...")
+    import mlx.core as mx
+    from mlx_sa3.ae import SA3MediumAE, decode_chunked
+    from mlx_sa3.weights import load_ae_weights
+    mlx_ae = SA3MediumAE()
+    load_ae_weights(mlx_ae, CKPT)
+elif AE_BACKEND == "torch":
+    print(f"[backend] loading torch AE on {AE_DEVICE}...")
+    torch_ae = load_autoencoder(CFG, CKPT, device=AE_DEVICE)
+    torch_ae.eval().requires_grad_(False)
+    try:
+        torch_ae.bottleneck.noise_regularize = False
+    except Exception:
+        pass
+else:
+    raise RuntimeError(f"unsupported SA3_AE_BACKEND={AE_BACKEND!r}; use auto, mlx, or torch")
+
+
+def decode_latents(lat_np):
+    if AE_BACKEND == "mlx":
+        lat = mx.array(lat_np)
+        if lat_np.shape[-1] > 128:
+            wav = decode_chunked(mlx_ae, lat, chunk_size=128, overlap=32)
+        else:
+            wav = mlx_ae.decode(lat)
+        mx.eval(wav)
+        return np.array(wav)[0]
+
+    with torch.inference_mode():
+        lat = torch.from_numpy(lat_np).to(AE_DEVICE)
+        wav = torch_ae.decode(lat)
+    return wav.detach().to(torch.float32).cpu().numpy()[0]
 
 
 # defined after helpers below; called at bottom of file
@@ -55,10 +109,7 @@ def render_noise_spec_once():
     T_lat = int(30 * SR / DOWNSAMPLE) + 1
     rng = np.random.default_rng(7)
     lat = rng.standard_normal((1, 256, T_lat)).astype(np.float32) * 0.3
-    wav = mlx_ae.decode(mx.array(lat))
-    mx.eval(wav)
-    wav_np = np.array(wav)[0]
-    render_spec_png(wav_np, out_path)
+    render_spec_png(decode_latents(lat), out_path)
 
 state = {"audio_path": None, "version": 0}
 _gen_lock = threading.Lock()
@@ -208,7 +259,7 @@ def _run_generate(body):
     kwargs = dict(prompt=body.prompt, steps=steps, cfg_scale=cfg, seed=seed, return_latents=True)
     if has_source and has_mask:
         audio, _ = sf.read(state["audio_path"])
-        audio_t = torch.from_numpy(audio.T).float().to("mps")   # (channels, T) — no batch dim
+        audio_t = torch.from_numpy(audio.T).float().to(DEVICE)   # (channels, T) — no batch dim
         # align mask length to the actual latent count of the loaded audio.
         # frontend's mask may be stale (different count from earlier session state).
         actual_lat = audio.shape[0] // DOWNSAMPLE
@@ -225,10 +276,10 @@ def _run_generate(body):
         kwargs["duration"] = audio.shape[0] / SR
         kwargs["sample_size"] = audio.shape[0]   # cap output to actual source length, not sa3's default 120s
         kwargs["inpaint_audio"] = (SR, audio_t)
-        kwargs["inpaint_mask"] = torch.from_numpy(audio_mask).unsqueeze(0).to("mps")
+        kwargs["inpaint_mask"] = torch.from_numpy(audio_mask).unsqueeze(0).to(DEVICE)
     elif has_source:
         audio, _ = sf.read(state["audio_path"])
-        audio_t = torch.from_numpy(audio.T).float().to("mps")
+        audio_t = torch.from_numpy(audio.T).float().to(DEVICE)
         kwargs["duration"] = audio.shape[0] / SR
         kwargs["sample_size"] = audio.shape[0]
         kwargs["init_audio"] = (SR, audio_t)
@@ -242,13 +293,9 @@ def _run_generate(body):
     lat_np = latents.detach().to(torch.float32).cpu().numpy()
     print(f"[backend] DIT {time.time()-t0:.1f}s, latents shape {lat_np.shape}")
     t1 = time.time()
-    if lat_np.shape[-1] > 128:
-        wav_m = decode_chunked(mlx_ae, mx.array(lat_np), chunk_size=128, overlap=32)
-    else:
-        wav_m = mlx_ae.decode(mx.array(lat_np))
-    mx.eval(wav_m)
+    wav_np = decode_latents(lat_np)
     print(f"[backend] AE {time.time()-t1:.1f}s")
-    wav_np = np.array(wav_m)[0]   # (2, T) — raw, no limiter (visual cap handled in frontend)
+    # (2, T) — raw, no limiter (visual cap handled in frontend)
 
     # sa3 pads internally to a power-of-2 latent count → output is longer than requested.
     target_dur = float(kwargs.get("duration", duration))
@@ -321,16 +368,20 @@ async def get_stats():
     vm = psutil.virtual_memory()
     ram_used_gb = (vm.total - vm.available) / 1e9
     ram_total_gb = vm.total / 1e9
-    mps_alloc_gb = 0.0
+    device_alloc_gb = 0.0
     try:
-        if torch.backends.mps.is_available():
-            mps_alloc_gb = torch.mps.current_allocated_memory() / 1e9
+        if DEVICE == "mps" and torch.backends.mps.is_available():
+            device_alloc_gb = torch.mps.current_allocated_memory() / 1e9
+        elif DEVICE == "cuda" and torch.cuda.is_available():
+            device_alloc_gb = torch.cuda.memory_allocated() / 1e9
     except Exception: pass
     return {
         "cpu": round(cpu, 1),
         "ram_used": round(ram_used_gb, 1),
         "ram_total": round(ram_total_gb, 1),
-        "mps_alloc": round(mps_alloc_gb, 2),
+        "mps_alloc": round(device_alloc_gb, 2),
+        "device": DEVICE,
+        "ae_backend": AE_BACKEND,
         "model_loaded": True,
     }
 
